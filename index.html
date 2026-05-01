@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ESP32 SoftAP Volt Monitor</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --card: #1f2937;
+      --ok: #10b981;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --border: #374151;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #0b1220, var(--bg));
+      color: var(--text);
+      min-height: 100vh;
+      padding: 14px;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      background: rgba(17, 24, 39, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .header {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.25rem;
+    }
+    .muted { color: var(--muted); }
+    .status {
+      font-size: 0.85rem;
+      padding: 5px 9px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+    }
+    .status.ok { color: var(--ok); }
+    .status.warn { color: var(--warn); }
+    .grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .span-4 { grid-column: span 4; }
+    .span-6 { grid-column: span 6; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: span 12; }
+    .label {
+      color: var(--muted);
+      font-size: 0.82rem;
+      margin-bottom: 6px;
+    }
+    .value {
+      font-size: 1.25rem;
+      font-weight: bold;
+    }
+    .meter {
+      margin-top: 8px;
+      width: 100%;
+      height: 14px;
+      border-radius: 999px;
+      background: #0b1220;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .meter-fill {
+      height: 100%;
+      width: 0;
+      transition: width 0.25s ease;
+    }
+    .relay-grid {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+    .relay {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      background: #111827;
+    }
+    .relay-title {
+      font-size: 0.9rem;
+      margin-bottom: 6px;
+    }
+    .relay-state {
+      font-size: 0.82rem;
+      font-weight: bold;
+    }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    code {
+      background: #0b1220;
+      color: #d1d5db;
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    .auth {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+    }
+    .field {
+      width: 100%;
+      border: 1px solid var(--border);
+      background: #0b1220;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 0.9rem;
+    }
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      border: 1px solid var(--border);
+      background: #111827;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .btn.primary {
+      border-color: #0f766e;
+      background: #134e4a;
+    }
+    .hidden { display: none; }
+    .footer {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.83rem;
+    }
+    @media (max-width: 900px) {
+      .span-4, .span-6, .span-8 { grid-column: span 12; }
+      body { padding: 10px; }
+      .container { padding: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <h1>Volticon</h1>
+        <div class="muted">Live battery and relay state from <code>/api/status</code>.</div>
+      </div>
+      <div id="apiState" class="status warn">Waiting for API</div>
+    </div>
+
+    <div id="authCard" class="card">
+      <div class="label">Login / Signup</div>
+      <div class="muted">Local browser auth for team dashboards on this device.</div>
+      <div class="auth">
+        <input id="username" class="field" placeholder="Username" />
+        <input id="password" class="field" type="password" placeholder="Password" />
+        <div class="btn-row">
+          <button id="signupBtn" class="btn">Sign Up</button>
+          <button id="loginBtn" class="btn primary">Login</button>
+        </div>
+        <div id="authMsg" class="muted"></div>
+      </div>
+    </div>
+
+    <div id="dashboard" class="grid hidden" style="margin-top: 10px;">
+      <div class="card span-4">
+        <div class="label">Grid Status</div>
+        <div id="gridStatus" class="value">-</div>
+      </div>
+      <div class="card span-4">
+        <div class="label">Battery Voltage</div>
+        <div id="batteryVoltage" class="value">0.00 V</div>
+      </div>
+      <div class="card span-4">
+        <div class="label">Current Draw</div>
+        <div id="currentA" class="value">0.00 A</div>
+      </div>
+
+      <div class="card span-6">
+        <div class="label">Battery SoC</div>
+        <div id="batterySoc" class="value">0%</div>
+        <div class="meter"><div id="socFill" class="meter-fill"></div></div>
+      </div>
+      <div class="card span-6">
+        <div class="label">Operating Mode</div>
+        <div id="mode" class="value">-</div>
+        <div class="footer">
+          Last update: <span id="updatedAt">-</span>
+        </div>
+      </div>
+
+      <div class="card span-12">
+        <div class="label">Relay Channels</div>
+        <div id="relayGrid" class="relay-grid"></div>
+      </div>
+
+      <div class="card span-12">
+        <div class="label">SoftAP Access</div>
+        <div class="muted">SSID: <code>SmartLoad-ESP32</code> | Password: <code>LoadShedding123</code></div>
+        <div style="margin-top: 7px;">
+          Open this dashboard at <code>http://192.168.4.1/</code>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const USERS_KEY = "volt_monitor_users";
+    const SESSION_KEY = "volt_monitor_session";
+
+    const authCard = document.getElementById("authCard");
+    const dashboard = document.getElementById("dashboard");
+    const authMsg = document.getElementById("authMsg");
+    const apiState = document.getElementById("apiState");
+
+    function getUsers() {
+      try {
+        return JSON.parse(localStorage.getItem(USERS_KEY) || "{}");
+      } catch {
+        return {};
+      }
+    }
+
+    function saveUsers(users) {
+      localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    }
+
+    function setSession(username) {
+      localStorage.setItem(SESSION_KEY, username);
+    }
+
+    function getSession() {
+      return localStorage.getItem(SESSION_KEY);
+    }
+
+    function showAuthMessage(msg, isError) {
+      authMsg.textContent = msg;
+      authMsg.className = isError ? "bad" : "ok";
+    }
+
+    function showDashboard(username, lastLogin) {
+      authCard.classList.add("hidden");
+      dashboard.classList.remove("hidden");
+      if (lastLogin) {
+        apiState.textContent = "Welcome " + username + " | Last login: " + lastLogin;
+      } else {
+        apiState.textContent = "Welcome " + username + " | First login";
+      }
+      apiState.className = "status ok";
+    }
+
+    document.getElementById("signupBtn").addEventListener("click", function () {
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+      if (!username || !password) {
+        showAuthMessage("Username and password are required.", true);
+        return;
+      }
+      const users = getUsers();
+      if (users[username]) {
+        showAuthMessage("User already exists. Login instead.", true);
+        return;
+      }
+      users[username] = { password: password, lastLogin: null };
+      saveUsers(users);
+      showAuthMessage("Signup successful. You can login now.", false);
+    });
+
+    document.getElementById("loginBtn").addEventListener("click", function () {
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+      const users = getUsers();
+      if (!users[username] || users[username].password !== password) {
+        showAuthMessage("Invalid username or password.", true);
+        return;
+      }
+      const previousLogin = users[username].lastLogin;
+      const now = new Date().toLocaleString();
+      users[username].lastLogin = now;
+      saveUsers(users);
+      setSession(username);
+      showDashboard(username, previousLogin);
+      fetchData();
+      setInterval(fetchData, 1000);
+    });
+
+    function socColor(soc) {
+      if (soc > 50) return "var(--ok)";
+      if (soc > 25) return "var(--warn)";
+      return "var(--bad)";
+    }
+
+    function updateRelayUI(relays) {
+      const grid = document.getElementById("relayGrid");
+      grid.innerHTML = "";
+      relays.forEach(function (ch) {
+        const item = document.createElement("div");
+        item.className = "relay";
+        const isOn = ch.closed === true || ch.status === "CLOSED";
+        item.innerHTML = ""
+          + "<div class='relay-title'>CH" + ch.channel + " - " + ch.label + "</div>"
+          + "<div class='relay-state " + (isOn ? "ok" : "warn") + "'>"
+          + (isOn ? "CONNECTED" : "SHED / OPEN")
+          + "</div>";
+        grid.appendChild(item);
+      });
+    }
+
+    function updateUI(data) {
+      document.getElementById("gridStatus").textContent = data.grid_status || (data.grid_active ? "ACTIVE" : "FAILED");
+      document.getElementById("gridStatus").className = "value " + (data.grid_active ? "ok" : "bad");
+      document.getElementById("batteryVoltage").textContent = Number(data.battery_voltage || 0).toFixed(2) + " V";
+      document.getElementById("currentA").textContent = Number(data.current_a || 0).toFixed(2) + " A";
+      document.getElementById("batterySoc").textContent = Math.round(data.battery_soc || 0) + "%";
+      document.getElementById("mode").textContent = data.mode || "-";
+
+      const soc = Math.max(0, Math.min(100, Number(data.battery_soc || 0)));
+      const fill = document.getElementById("socFill");
+      fill.style.width = soc + "%";
+      fill.style.background = socColor(soc);
+
+      const relays = Array.isArray(data.relay_channels) ? data.relay_channels : [];
+      updateRelayUI(relays);
+      document.getElementById("updatedAt").textContent = new Date().toLocaleTimeString();
+    }
+
+    async function fetchData() {
+      try {
+        const res = await fetch("/api/status");
+        if (!res.ok) throw new Error("bad response");
+        const data = await res.json();
+        updateUI(data);
+        if (!apiState.textContent.includes("Welcome")) {
+          apiState.textContent = "API Connected";
+        }
+        apiState.className = "status ok";
+      } catch (err) {
+        apiState.textContent = "API Offline - check ESP32";
+        apiState.className = "status warn";
+      }
+    }
+
+    (function autoLogin() {
+      const username = getSession();
+      if (!username) return;
+      const users = getUsers();
+      if (!users[username]) return;
+      showDashboard(username, users[username].lastLogin);
+      fetchData();
+      setInterval(fetchData, 1000);
+    })();
+  </script>
+</body>
+</html>
